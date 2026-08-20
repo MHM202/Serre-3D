@@ -1,0 +1,842 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Serre tunnel 40 x 20 m - Vue 3D réaliste</title>
+<style>
+  html, body { margin:0; padding:0; overflow:hidden; background:#bfe3ff; font-family: Arial, Helvetica, sans-serif; }
+  #container { width:100vw; height:100vh; display:block; }
+  #panel {
+    position:absolute; top:56px; left:14px; background:rgba(255,255,255,0.9);
+    padding:14px 18px; border-radius:8px; box-shadow:0 2px 10px rgba(0,0,0,0.18);
+    max-width:320px; font-size:13px; color:#222; line-height:1.5;
+  }
+  #panel h1 { font-size:16px; margin:0 0 8px; color:#0b3d2e; }
+  #panel .row { display:flex; justify-content:space-between; border-top:1px solid #ddd; padding:4px 0; }
+  #panel .row span:first-child { color:#555; }
+  #panel .row span:last-child { font-weight:bold; color:#0b3d2e; }
+  #hint {
+    position:absolute; bottom:14px; left:14px; background:rgba(255,255,255,0.85);
+    padding:8px 12px; border-radius:6px; font-size:12px; color:#333;
+  }
+  #legend {
+    position:absolute; top:56px; right:14px; background:rgba(255,255,255,0.9);
+    padding:10px 14px; border-radius:8px; font-size:12px; color:#333; box-shadow:0 2px 10px rgba(0,0,0,0.18);
+  }
+  #legend div { display:flex; align-items:center; gap:6px; margin:3px 0; }
+  #legend .sw { width:14px; height:10px; display:inline-block; border-radius:2px; }
+  #legendToggle {
+    position:absolute; top:14px; right:14px; background:rgba(255,255,255,0.92);
+    padding:7px 12px; border-radius:8px; font-size:12px; color:#0b3d2e; box-shadow:0 2px 10px rgba(0,0,0,0.18);
+    border:none; cursor:pointer; font-family:inherit;
+  }
+  #legendToggle:hover { background:#fff; }
+  #panelToggle {
+    position:absolute; top:14px; left:14px; background:rgba(255,255,255,0.92);
+    padding:7px 12px; border-radius:8px; font-size:12px; color:#0b3d2e; box-shadow:0 2px 10px rgba(0,0,0,0.18);
+    border:none; cursor:pointer; font-family:inherit;
+  }
+  #panelToggle:hover { background:#fff; }
+</style>
+</head>
+<body>
+<div id="container"></div>
+
+<button id="panelToggle" onclick="(function(){var p=document.getElementById('panel');var b=document.getElementById('panelToggle');var hidden=p.style.display==='none';p.style.display=hidden?'block':'none';b.textContent=hidden?'Masquer les infos':'Afficher les infos';})()">Masquer les infos</button>
+<div id="panel">
+  <h1>Serre tunnel bi-chapelle</h1>
+  <div class="row"><span>Longueur</span><span>40 m</span></div>
+  <div class="row"><span>Largeur</span><span>20 m (2 travées x 10 m)</span></div>
+  <div class="row"><span>Culture</span><span>Laitues (12 rangées)</span></div>
+  <div class="row"><span>Structure</span><span>Acier galvanisé</span></div>
+  <div class="row"><span>Couverture</span><span>Film plastique translucide</span></div>
+</div>
+
+<button id="legendToggle" onclick="(function(){var l=document.getElementById('legend');var b=document.getElementById('legendToggle');var hidden=l.style.display==='none';l.style.display=hidden?'block':'none';b.textContent=hidden?'Masquer la légende':'Afficher la légende';})()">Masquer la légende</button>
+<div id="legend">
+  <div><span class="sw" style="background:#9aa0a6"></span>Structure acier</div>
+  <div><span class="sw" style="background:#dff0e8;opacity:0.7"></span>Film de couverture</div>
+  <div><span class="sw" style="background:#8a4a2a"></span>Portes</div>
+  <div><span class="sw" style="background:#1a1a1a"></span>Irrigation goutte-à-goutte</div>
+  <div><span class="sw" style="background:#3a3a3d"></span>Voirie / lotissement</div>
+</div>
+
+<div id="hint">Clic gauche : orbiter — molette : zoom — clic droit : déplacer</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+// ---------- Dimensions (m) ----------
+const LENGTH = 40, WIDTH = 20, SPAN = 10, N_TRAVEES = WIDTH/SPAN;
+const GUTTER_H = 1.0, RIDGE_H = 2.5, ARCH_SPACING = 2;
+const DOOR_WIDTH = 4, DOOR_HEIGHT = 2.0;
+
+const doorCenters = [SPAN*0.5, SPAN*1.5];
+const doorRanges = doorCenters.map(c => [c - DOOR_WIDTH/2, c + DOOR_WIDTH/2]);
+
+function archY(u) { return GUTTER_H + (RIDGE_H-GUTTER_H)*Math.sin(Math.PI*u); }
+
+// ---------- Scene ----------
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog(0xbcd8ea, 110, 340);
+
+function makeSkyDome() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 4; canvas.height = 256;
+  const ctx = canvas.getContext('2d');
+  const grad = ctx.createLinearGradient(0, 0, 0, 256);
+  grad.addColorStop(0, '#3f7dc9');
+  grad.addColorStop(0.45, '#8fc3ec');
+  grad.addColorStop(0.75, '#cfe6e0');
+  grad.addColorStop(1, '#e8e6d4');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 4, 256);
+  const tex = new THREE.CanvasTexture(canvas);
+  const geo = new THREE.SphereGeometry(320, 32, 32);
+  const mat = new THREE.MeshBasicMaterial({ map: tex, side: THREE.BackSide, fog: false });
+  const dome = new THREE.Mesh(geo, mat);
+  scene.add(dome);
+}
+makeSkyDome();
+
+const camera = new THREE.PerspectiveCamera(45, window.innerWidth/window.innerHeight, 0.1, 700);
+camera.position.set(98, 40, 58);
+
+const renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.getElementById('container').appendChild(renderer.domElement);
+
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.target.set(6, 3, 10);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.update();
+
+// ---------- Lights ----------
+const hemi = new THREE.HemisphereLight(0xbfe3ff, 0x4a6b3a, 0.65);
+scene.add(hemi);
+
+const sun = new THREE.DirectionalLight(0xfff2da, 1.05);
+sun.position.set(45, 65, 15);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.left = -70; sun.shadow.camera.right = 90;
+sun.shadow.camera.top = 70; sun.shadow.camera.bottom = -50;
+sun.shadow.camera.near = 1; sun.shadow.camera.far = 220;
+sun.shadow.bias = -0.0015;
+scene.add(sun);
+
+const fill = new THREE.DirectionalLight(0xcfe8ff, 0.25);
+fill.position.set(-30, 25, -20);
+scene.add(fill);
+
+// ---------- Ground (grass) ----------
+function makeGrassTexture() {
+  const size = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#6e9b48';
+  ctx.fillRect(0, 0, size, size);
+  for (let i = 0; i < 4000; i++) {
+    const x = Math.random()*size, y = Math.random()*size;
+    const g = 90 + Math.random()*70;
+    ctx.fillStyle = `rgba(${55+Math.random()*35},${g},${40+Math.random()*35},0.5)`;
+    ctx.fillRect(x, y, 1.4, 1.4);
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(50, 50);
+  return tex;
+}
+const groundMat = new THREE.MeshStandardMaterial({ map: makeGrassTexture(), roughness: 1 });
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(500, 500), groundMat);
+ground.rotation.x = -Math.PI/2;
+ground.position.set(LENGTH/2 - 30, 0, WIDTH/2);
+ground.receiveShadow = true;
+scene.add(ground);
+
+// haie basse en bordure du champ, cote ville
+const hedgeMat = new THREE.MeshStandardMaterial({ color: 0x33501f, roughness: 1 });
+const hedge = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.8, WIDTH+6), hedgeMat);
+hedge.position.set(-9, 0.4, WIDTH/2);
+hedge.castShadow = true; hedge.receiveShadow = true;
+scene.add(hedge);
+
+// gravel base under the greenhouse
+const baseMat = new THREE.MeshStandardMaterial({ color: 0x9c9284, roughness: 1 });
+const base = new THREE.Mesh(new THREE.PlaneGeometry(LENGTH+2, WIDTH+2), baseMat);
+base.rotation.x = -Math.PI/2;
+base.position.set(LENGTH/2, 0.005, WIDTH/2);
+base.receiveShadow = true;
+scene.add(base);
+
+// access path to the doors
+const pathMat = new THREE.MeshStandardMaterial({ color: 0xa08a68, roughness: 1 });
+const path = new THREE.Mesh(new THREE.PlaneGeometry(7, 16), pathMat);
+path.rotation.x = -Math.PI/2;
+path.position.set(-6.5, 0.01, WIDTH/2);
+path.receiveShadow = true;
+scene.add(path);
+
+// ---------- Materials ----------
+const steelMat = new THREE.MeshStandardMaterial({ color: 0xa7adb3, metalness: 0.65, roughness: 0.4 });
+const skinMat = new THREE.MeshStandardMaterial({ color: 0xe6f5ec, transparent: true, opacity: 0.32, roughness: 0.25, metalness: 0.0, side: THREE.DoubleSide, depthWrite: false });
+const doorMat = new THREE.MeshStandardMaterial({ color: 0x7a4326, roughness: 0.8, metalness: 0.1, side: THREE.DoubleSide });
+
+// ---------- Helpers ----------
+function tubeBetween(p1, p2, radius, material) {
+  const dir = new THREE.Vector3().subVectors(p2, p1);
+  const len = dir.length();
+  if (len < 1e-6) return;
+  const geo = new THREE.CylinderGeometry(radius, radius, len, 8);
+  const mesh = new THREE.Mesh(geo, material);
+  mesh.position.copy(new THREE.Vector3().addVectors(p1, p2).multiplyScalar(0.5));
+  mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), dir.clone().normalize());
+  mesh.castShadow = true; mesh.receiveShadow = true;
+  scene.add(mesh);
+}
+
+function archTube(x, zStart, radius) {
+  const segs = 24;
+  const pts = [];
+  for (let i=0;i<=segs;i++){
+    const u = i/segs;
+    pts.push(new THREE.Vector3(x, archY(u), zStart + u*SPAN));
+  }
+  const curve = new THREE.CatmullRomCurve3(pts);
+  const geo = new THREE.TubeGeometry(curve, 40, radius, 6, false);
+  const mesh = new THREE.Mesh(geo, steelMat);
+  mesh.castShadow = true; mesh.receiveShadow = true;
+  scene.add(mesh);
+}
+
+// ---------- Arceaux ----------
+const nArches = LENGTH/ARCH_SPACING + 1;
+for (let a=0; a<nArches; a++) {
+  const x = a*ARCH_SPACING;
+  for (let t=0; t<N_TRAVEES; t++) {
+    archTube(x, t*SPAN, 0.045);
+  }
+}
+
+// ---------- Poteaux (trame reguliere) ----------
+for (let a=0; a<nArches; a++) {
+  const x = a*ARCH_SPACING;
+  for (let g=0; g<=N_TRAVEES; g++) {
+    const z = g*SPAN;
+    tubeBetween(new THREE.Vector3(x,0,z), new THREE.Vector3(x,GUTTER_H,z), 0.04, steelMat);
+  }
+}
+
+// poteaux renforces des montants de porte (facade x=0)
+doorRanges.forEach(([z1,z2])=>{
+  tubeBetween(new THREE.Vector3(0,0,z1), new THREE.Vector3(0,DOOR_HEIGHT,z1), 0.05, steelMat);
+  tubeBetween(new THREE.Vector3(0,0,z2), new THREE.Vector3(0,DOOR_HEIGHT,z2), 0.05, steelMat);
+});
+
+// ---------- Gouttieres ----------
+for (let g=0; g<=N_TRAVEES; g++) {
+  const z = g*SPAN;
+  tubeBetween(new THREE.Vector3(0,GUTTER_H,z), new THREE.Vector3(LENGTH,GUTTER_H,z), 0.05, steelMat);
+}
+
+// ---------- Faitieres ----------
+for (let t=0; t<N_TRAVEES; t++) {
+  const z = t*SPAN + SPAN/2;
+  tubeBetween(new THREE.Vector3(0,RIDGE_H,z), new THREE.Vector3(LENGTH,RIDGE_H,z), 0.045, steelMat);
+}
+
+// ---------- Sablieres intermediaires ----------
+[0.3, 0.7].forEach(u=>{
+  for (let t=0; t<N_TRAVEES; t++) {
+    const zStart = t*SPAN;
+    const y = archY(u);
+    const z = zStart + u*SPAN;
+    tubeBetween(new THREE.Vector3(0,y,z), new THREE.Vector3(LENGTH,y,z), 0.035, steelMat);
+  }
+});
+
+// ---------- Couverture (film plastique) ----------
+function buildSkin(zStart) {
+  const nx = LENGTH/ARCH_SPACING;
+  const nu = 24;
+  const positions = [];
+  const indices = [];
+  for (let i=0;i<=nx;i++){
+    const x = i*ARCH_SPACING;
+    for (let j=0;j<=nu;j++){
+      const u = j/nu;
+      positions.push(x, archY(u), zStart + u*SPAN);
+    }
+  }
+  const rowLen = nu+1;
+  for (let i=0;i<nx;i++){
+    for (let j=0;j<nu;j++){
+      const a = i*rowLen+j, b = a+rowLen, c = a+1, d = b+1;
+      indices.push(a,b,c, b,d,c);
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  const mesh = new THREE.Mesh(geo, skinMat);
+  mesh.receiveShadow = true;
+  scene.add(mesh);
+}
+for (let t=0; t<N_TRAVEES; t++) buildSkin(t*SPAN);
+
+// ---------- Pignons (murs de tete) avec ouvertures de porte a x=0 ----------
+function buildGableWall(x, withDoors) {
+  const dz = 0.25;
+  const nStrips = Math.round(WIDTH/dz);
+  for (let s=0; s<nStrips; s++){
+    const z0 = s*dz, z1 = z0+dz, zc = (z0+z1)/2;
+    const t = Math.min(Math.floor(zc/SPAN), N_TRAVEES-1);
+    const zStart = t*SPAN;
+    const uc = (zc - zStart)/SPAN;
+    const yTop = archY(uc);
+    let yBottom = 0;
+    if (withDoors) {
+      const inDoor = doorRanges.some(([a,b]) => zc >= a && zc <= b);
+      if (inDoor) yBottom = DOOR_HEIGHT;
+    }
+    if (yBottom >= yTop) continue;
+    const geo = new THREE.PlaneGeometry(dz, yTop - yBottom);
+    const mesh = new THREE.Mesh(geo, skinMat);
+    mesh.position.set(x, (yTop+yBottom)/2, zc);
+    mesh.rotation.y = Math.PI/2;
+    mesh.receiveShadow = true;
+    scene.add(mesh);
+  }
+}
+buildGableWall(0, true);
+buildGableWall(LENGTH, false);
+
+// ---------- Portes ----------
+doorRanges.forEach(([z1,z2], idx)=>{
+  const w = z2 - z1;
+  const doorGeo = new THREE.PlaneGeometry(w, DOOR_HEIGHT);
+  const door = new THREE.Mesh(doorGeo, doorMat);
+  door.position.set(0.03, DOOR_HEIGHT/2, (z1+z2)/2);
+  door.rotation.y = Math.PI/2;
+  door.castShadow = true; door.receiveShadow = true;
+  scene.add(door);
+  // panneaux (traverses)
+  for (let k=1;k<3;k++){
+    const y = DOOR_HEIGHT*k/3;
+    tubeBetween(new THREE.Vector3(0.04,y,z1), new THREE.Vector3(0.04,y,z2), 0.02, steelMat);
+  }
+});
+
+// ---------- Laitues (rangees en pleine terre) ----------
+function makeLeafShape(ruffle) {
+  const shape = new THREE.Shape();
+  const N = 14;
+  shape.moveTo(0, 0);
+  for (let i=0; i<=N; i++){
+    const t = i/N;
+    const w = Math.sin(Math.PI*t) * (0.085 + 0.018*Math.sin(t*16*ruffle + 1.4));
+    shape.lineTo(w, t*0.20 + 0.01);
+  }
+  for (let i=N; i>=0; i--){
+    const t = i/N;
+    const w = -(Math.sin(Math.PI*t) * (0.085 + 0.018*Math.sin(t*16*ruffle + 3.1)));
+    shape.lineTo(w, t*0.20 + 0.01);
+  }
+  shape.lineTo(0, 0);
+  return shape;
+}
+
+function buildLettuceRows() {
+  const leafGeoOuter = new THREE.ShapeGeometry(makeLeafShape(1.0), 4);
+  const leafGeoMid = new THREE.ShapeGeometry(makeLeafShape(0.8), 4);
+  const leafGeoInner = new THREE.ShapeGeometry(makeLeafShape(0.5), 4);
+  const heartGeo = new THREE.SphereGeometry(0.045, 6, 5);
+
+  // palette 100% verte : exterieur plus fonce, coeur plus clair / tendre
+  const tierPalettes = [
+    [0x2f6b2a, 0x3a7a30, 0x357232],   // exterieur - vert fonce
+    [0x4c9339, 0x59a042, 0x4f9838],   // milieu - vert franc
+    [0x86c25a, 0x9bd06b, 0x7cbb52]    // coeur - vert tendre / clair
+  ];
+  const heartMat = new THREE.MeshStandardMaterial({ color: 0x9ed273, roughness: 0.7 });
+
+  const tierGeos = [leafGeoOuter, leafGeoMid, leafGeoInner];
+  const tierLeafCount = [4, 4, 3];
+  const tierScale = [1.15, 0.85, 0.55];
+  const tierTiltDeg = [62, 42, 20]; // inclinaison depuis l'horizontale
+  const tierRadius = [0.02, 0.015, 0.008];
+
+  // davantage de rangees, plus rapprochees
+  const rows = [];
+  for (let t=0; t<N_TRAVEES; t++) {
+    [0.08, 0.24, 0.40, 0.56, 0.72, 0.88].forEach(u => rows.push(t*SPAN + u*SPAN));
+  }
+  const plantXs = [];
+  for (let x=1; x<=LENGTH-1; x+=0.32) plantXs.push(x);
+
+  let seed = 42;
+  function rnd(){ seed = (seed*9301+49297) % 233280; return seed/233280; }
+
+  // groupes par (tier, variante de couleur)
+  const groups = [];
+  for (let tier=0; tier<3; tier++){
+    groups.push(tierPalettes[tier].map(c => ({
+      mat: new THREE.MeshStandardMaterial({ color: c, roughness: 0.75, side: THREE.DoubleSide }),
+      items: []
+    })));
+  }
+  const hearts = [];
+
+  rows.forEach(z=>{
+    plantXs.forEach(x=>{
+      const jx = x + (rnd()-0.5)*0.1;
+      const jz = z + (rnd()-0.5)*0.1;
+      const plantScale = 0.85 + rnd()*0.4;
+      const baseRot = rnd()*Math.PI*2;
+
+      for (let tier=0; tier<3; tier++){
+        const n = tierLeafCount[tier];
+        for (let k=0; k<n; k++){
+          const a = baseRot + (k/n)*Math.PI*2 + (rnd()-0.5)*0.5;
+          const gi = Math.floor(rnd()*groups[tier].length);
+          const s = plantScale * tierScale[tier] * (0.85 + rnd()*0.3);
+          groups[tier][gi].items.push({
+            x: jx + Math.cos(a)*tierRadius[tier]*plantScale,
+            y: 0.01 + tier*0.012,
+            z: jz + Math.sin(a)*tierRadius[tier]*plantScale,
+            s, angleY: -a, tiltRad: (tierTiltDeg[tier] + (rnd()-0.5)*10) * Math.PI/180
+          });
+        }
+      }
+      hearts.push({ x: jx, y: 0.05*plantScale, z: jz, s: plantScale*0.9 });
+    });
+  });
+
+  const dummy = new THREE.Object3D();
+  const up = new THREE.Vector3(0,1,0);
+
+  for (let tier=0; tier<3; tier++){
+    groups[tier].forEach(g => {
+      if (!g.items.length) return;
+      const mesh = new THREE.InstancedMesh(tierGeos[tier], g.mat, g.items.length);
+      mesh.castShadow = true; mesh.receiveShadow = true;
+      g.items.forEach((p, i) => {
+        dummy.position.set(p.x, p.y, p.z);
+        dummy.rotation.set(-p.tiltRad, p.angleY, 0);
+        dummy.scale.set(p.s, p.s, p.s);
+        dummy.updateMatrix();
+        mesh.setMatrixAt(i, dummy.matrix);
+      });
+      scene.add(mesh);
+    });
+  }
+
+  const heartMesh = new THREE.InstancedMesh(heartGeo, heartMat, hearts.length);
+  heartMesh.castShadow = true;
+  hearts.forEach((p, i) => {
+    dummy.position.set(p.x, p.y, p.z);
+    dummy.rotation.set(0,0,0);
+    dummy.scale.set(p.s, p.s*0.7, p.s);
+    dummy.updateMatrix();
+    heartMesh.setMatrixAt(i, dummy.matrix);
+  });
+  scene.add(heartMesh);
+
+  return { rows, plantXs };
+}
+const { rows: cropRows, plantXs: cropPlantXs } = buildLettuceRows();
+
+
+
+// ---------- Irrigation goutte-à-goutte ----------
+function buildDripIrrigation(rows, plantXs) {
+  const pipeMat = new THREE.MeshStandardMaterial({ color: 0x1c1c1c, roughness: 0.65 });
+  const dripY = 0.07;
+
+  // rampes le long de chaque rangee, avec un goutteur a chaque pied de plant
+  const dripGeo = new THREE.CylinderGeometry(0.014, 0.014, 0.03, 6);
+  const dripMat = new THREE.MeshStandardMaterial({ color: 0x2f2f2f, roughness: 0.5 });
+  const dripCount = rows.length * plantXs.length;
+  const dripMesh = new THREE.InstancedMesh(dripGeo, dripMat, dripCount);
+  const dummy = new THREE.Object3D();
+  let di = 0;
+
+  rows.forEach(z=>{
+    tubeBetween(new THREE.Vector3(0.35, dripY, z), new THREE.Vector3(LENGTH-0.35, dripY, z), 0.014, pipeMat);
+    plantXs.forEach(x=>{
+      dummy.position.set(x, dripY+0.02, z);
+      dummy.rotation.set(0,0,0);
+      dummy.scale.set(1,1,1);
+      dummy.updateMatrix();
+      dripMesh.setMatrixAt(di++, dummy.matrix);
+    });
+  });
+  scene.add(dripMesh);
+
+  // collecteur (manifold) qui relie les 4 rampes, cote facade
+  const manifoldX = 0.35;
+  const zMin = Math.min(...rows), zMax = Math.max(...rows);
+  tubeBetween(new THREE.Vector3(manifoldX, dripY, zMin), new THREE.Vector3(manifoldX, dripY, zMax), 0.022, pipeMat);
+
+  // vannes / raccords a chaque piquage du collecteur vers une rampe
+  const valveGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.09, 8);
+  const valveMat = new THREE.MeshStandardMaterial({ color: 0x3a6b8a, roughness: 0.5, metalness: 0.3 });
+  rows.forEach(z=>{
+    const valve = new THREE.Mesh(valveGeo, valveMat);
+    valve.rotation.z = Math.PI/2;
+    valve.position.set(manifoldX, dripY+0.03, z);
+    valve.castShadow = true;
+    scene.add(valve);
+  });
+
+  // conduite d'alimentation : du collecteur vers l'exterieur (filtre + cuve)
+  const feedZ = (zMin+zMax)/2;
+  tubeBetween(new THREE.Vector3(manifoldX, dripY, feedZ), new THREE.Vector3(-1.0, dripY, feedZ), 0.022, pipeMat);
+  tubeBetween(new THREE.Vector3(-1.0, dripY, feedZ), new THREE.Vector3(-1.0, 0.5, feedZ), 0.022, pipeMat);
+  tubeBetween(new THREE.Vector3(-1.0, 0.5, feedZ), new THREE.Vector3(-3.0, 0.5, feedZ), 0.022, pipeMat);
+
+  // filtre a tamis
+  const filterMat = new THREE.MeshStandardMaterial({ color: 0x5a7a3a, roughness: 0.5, metalness: 0.3 });
+  const filter = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.4, 10), filterMat);
+  filter.rotation.z = Math.PI/2;
+  filter.position.set(-1.9, 0.5, feedZ);
+  filter.castShadow = true;
+  scene.add(filter);
+
+  // cuve d'eau + support
+  const tankMat = new THREE.MeshStandardMaterial({ color: 0x2f6b8a, roughness: 0.4, metalness: 0.1 });
+  const tank = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 1.5, 16), tankMat);
+  tank.position.set(-3.0, 0.85, feedZ);
+  tank.castShadow = true; tank.receiveShadow = true;
+  scene.add(tank);
+  const capMat = new THREE.MeshStandardMaterial({ color: 0x1e4a63, roughness: 0.5 });
+  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.62, 0.62, 0.08, 16), capMat);
+  cap.position.set(-3.0, 1.62, feedZ);
+  scene.add(cap);
+  const standMat = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.6, metalness: 0.4 });
+  const stand = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 0.1, 16), standMat);
+  stand.position.set(-3.0, 0.05, feedZ);
+  stand.castShadow = true;
+  scene.add(stand);
+}
+buildDripIrrigation(cropRows, cropPlantXs);
+
+// ---------- Arbres (bordures de rue, champ, jardins) ----------
+function makeTree(x, z, scale) {
+  const group = new THREE.Group();
+  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x6b4a2f, roughness: 1 });
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.15*scale, 0.24*scale, 2.4*scale, 8), trunkMat);
+  trunk.position.y = 1.2*scale;
+  trunk.castShadow = true; trunk.receiveShadow = true;
+  group.add(trunk);
+
+  const greens = [0x3d6b2e, 0x4a7a37, 0x35602a];
+  for (let i=0;i<4;i++){
+    const r = (1.15 - i*0.14) * scale;
+    const mat = new THREE.MeshStandardMaterial({ color: greens[i % greens.length], roughness: 1 });
+    const m = new THREE.Mesh(new THREE.SphereGeometry(r, 8, 8), mat);
+    m.position.set((Math.random()-0.5)*0.5*scale, (2.6 + i*0.5)*scale, (Math.random()-0.5)*0.5*scale);
+    m.castShadow = true;
+    group.add(m);
+  }
+  group.position.set(x, 0, z);
+  scene.add(group);
+}
+
+// ---------- Textures procedurales : asphalte, trottoir, tuiles, facades ----------
+function makeAsphaltTexture() {
+  const s = 128;
+  const c = document.createElement('canvas'); c.width = s; c.height = s;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#3a3a3d';
+  ctx.fillRect(0,0,s,s);
+  for (let i=0;i<1400;i++){
+    const x = Math.random()*s, y = Math.random()*s;
+    const v = 45 + Math.random()*35;
+    ctx.fillStyle = `rgba(${v},${v},${v+3},0.5)`;
+    ctx.fillRect(x,y,1.2,1.2);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  return tex;
+}
+function makeSidewalkTexture() {
+  const s = 64;
+  const c = document.createElement('canvas'); c.width = s; c.height = s;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#bdb9ae';
+  ctx.fillRect(0,0,s,s);
+  ctx.strokeStyle = 'rgba(120,116,105,0.6)';
+  ctx.lineWidth = 1.5;
+  for (let i=0;i<=4;i++){ const p=i*s/4; ctx.beginPath(); ctx.moveTo(p,0); ctx.lineTo(p,s); ctx.stroke(); }
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  return tex;
+}
+function makeWindowTexture(cols, rows, wallColor, litSeed) {
+  const cw = 48, ch = 56;
+  const c = document.createElement('canvas'); c.width = cw*cols; c.height = ch*rows;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = wallColor;
+  ctx.fillRect(0,0,c.width,c.height);
+  let seed = litSeed;
+  function rnd(){ seed = (seed*9301+49297)%233280; return seed/233280; }
+  for (let r=0;r<rows;r++){
+    for (let col=0; col<cols; col++){
+      const x = col*cw + cw*0.18, y = r*ch + ch*0.22;
+      const w = cw*0.64, h = ch*0.56;
+      const lit = rnd() < 0.22;
+      ctx.fillStyle = lit ? '#f4e2a0' : 'rgba(70,95,110,0.85)';
+      ctx.fillRect(x,y,w,h);
+      ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(x,y,w,h);
+    }
+  }
+  const tex = new THREE.CanvasTexture(c);
+  return tex;
+}
+function makeTileRoofTexture(color) {
+  const s = 32;
+  const c = document.createElement('canvas'); c.width = s; c.height = s;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = color;
+  ctx.fillRect(0,0,s,s);
+  ctx.strokeStyle = 'rgba(0,0,0,0.18)';
+  for (let y=0; y<s; y+=6){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(s,y); ctx.stroke(); }
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(2,2);
+  return tex;
+}
+
+const asphaltTex = makeAsphaltTexture();
+const sidewalkTex = makeSidewalkTexture();
+
+// ---------- Reseau de rues ----------
+const ROAD_W = 6;
+const LOT = 14;
+const PITCH = ROAD_W + LOT;
+const TOWN_COLS = 3, TOWN_ROWS = 4;
+const TOWN_X0 = -74, TOWN_Z0 = -16;
+
+function buildRoads() {
+  const spanX = TOWN_COLS*PITCH + ROAD_W;
+  const spanZ = TOWN_ROWS*PITCH + ROAD_W;
+
+  // rues verticales (le long de z)
+  for (let cIdx=0; cIdx<=TOWN_COLS; cIdx++){
+    const x = TOWN_X0 + cIdx*PITCH;
+    const tex = asphaltTex.clone(); tex.needsUpdate = true;
+    tex.repeat.set(ROAD_W/3, spanZ/3);
+    const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 1 });
+    const road = new THREE.Mesh(new THREE.PlaneGeometry(ROAD_W, spanZ), mat);
+    road.rotation.x = -Math.PI/2;
+    road.position.set(x, 0.008, TOWN_Z0 + spanZ/2 - ROAD_W/2);
+    road.receiveShadow = true;
+    scene.add(road);
+    const lineMat = new THREE.MeshStandardMaterial({ color: 0xe3dfc8, roughness: 0.9 });
+    const line = new THREE.Mesh(new THREE.PlaneGeometry(0.15, spanZ), lineMat);
+    line.rotation.x = -Math.PI/2;
+    line.position.set(x, 0.012, TOWN_Z0 + spanZ/2 - ROAD_W/2);
+    scene.add(line);
+  }
+  // rues horizontales (le long de x)
+  for (let rIdx=0; rIdx<=TOWN_ROWS; rIdx++){
+    const z = TOWN_Z0 + rIdx*PITCH;
+    const tex = asphaltTex.clone(); tex.needsUpdate = true;
+    tex.repeat.set(spanX/3, ROAD_W/3);
+    const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 1 });
+    const road = new THREE.Mesh(new THREE.PlaneGeometry(spanX, ROAD_W), mat);
+    road.rotation.x = -Math.PI/2;
+    road.position.set(TOWN_X0 + spanX/2 - ROAD_W/2, 0.007, z);
+    road.receiveShadow = true;
+    scene.add(road);
+    const lineMat = new THREE.MeshStandardMaterial({ color: 0xe3dfc8, roughness: 0.9 });
+    const line = new THREE.Mesh(new THREE.PlaneGeometry(spanX, 0.15), lineMat);
+    line.rotation.x = -Math.PI/2;
+    line.position.set(TOWN_X0 + spanX/2 - ROAD_W/2, 0.011, z);
+    scene.add(line);
+  }
+  // route de desserte reliant la ville a l'allee de la serre
+  const linkTex = asphaltTex.clone(); linkTex.needsUpdate = true; linkTex.repeat.set(2, 8);
+  const linkMat = new THREE.MeshStandardMaterial({ map: linkTex, roughness: 1 });
+  const link = new THREE.Mesh(new THREE.PlaneGeometry(5, 30), linkMat);
+  link.rotation.x = -Math.PI/2;
+  link.position.set(-11.5, 0.008, WIDTH/2);
+  link.receiveShadow = true;
+  scene.add(link);
+}
+buildRoads();
+
+// ---------- Immeubles / maisons de ville ----------
+const wallPalette = ['#e6d9b8','#d8c7a3','#c9b896','#e0dccf','#cdb99e','#b9a888'];
+const roofPalette = ['#7a3b2e','#5c4a3a','#8a4a2a','#6b5240','#8f5334'];
+
+function makeBuilding(cx, cz, seed) {
+  let s = seed;
+  function rnd(){ s = (s*9301+49297)%233280; return s/233280; }
+
+  const w = 6 + rnd()*4;
+  const d = 6 + rnd()*4;
+  const floors = 1 + Math.floor(rnd()*3);
+  const floorH = 2.7;
+  const h = floors*floorH;
+  const rotY = (rnd()<0.5?0:Math.PI/2) + (rnd()-0.5)*0.06;
+  const wallColor = wallPalette[Math.floor(rnd()*wallPalette.length)];
+  const roofColor = roofPalette[Math.floor(rnd()*roofPalette.length)];
+  const flatRoof = rnd() < 0.35;
+
+  const group = new THREE.Group();
+
+  const cols = Math.max(2, Math.round(w/1.8));
+  const winTex = makeWindowTexture(cols, floors, wallColor, Math.floor(rnd()*99999));
+  winTex.wrapS = winTex.wrapT = THREE.ClampToEdgeWrapping;
+  const wallMat = new THREE.MeshStandardMaterial({ map: winTex, roughness: 0.85 });
+  const plainMat = new THREE.MeshStandardMaterial({ color: wallColor, roughness: 0.9 });
+
+  const bodyGeo = new THREE.BoxGeometry(w, h, d);
+  const mats = [wallMat, wallMat, plainMat, plainMat, wallMat, wallMat];
+  const body = new THREE.Mesh(bodyGeo, mats);
+  body.position.y = h/2;
+  body.castShadow = true; body.receiveShadow = true;
+  group.add(body);
+
+  if (flatRoof) {
+    const roofMat = new THREE.MeshStandardMaterial({ color: 0x8a8a86, roughness: 0.95 });
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(w+0.3, 0.25, d+0.3), roofMat);
+    roof.position.y = h + 0.12;
+    roof.castShadow = true; roof.receiveShadow = true;
+    group.add(roof);
+  } else {
+    const roofTex = makeTileRoofTexture(roofColor);
+    const roofMat = new THREE.MeshStandardMaterial({ map: roofTex, roughness: 0.85 });
+    const roofH = 1.6 + rnd()*0.8;
+    const roof = new THREE.Mesh(new THREE.ConeGeometry(Math.max(w,d)*0.78, roofH, 4), roofMat);
+    roof.position.y = h + roofH/2 - 0.1;
+    roof.rotation.y = Math.PI/4;
+    roof.scale.set(1, 1, d/w);
+    roof.castShadow = true;
+    group.add(roof);
+  }
+
+  // porte d'entree
+  const doorMat = new THREE.MeshStandardMaterial({ color: 0x4a3324, roughness: 0.8 });
+  const door = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 2.0), doorMat);
+  door.position.set(0, 1.0, d/2 + 0.01);
+  group.add(door);
+
+  // petit perron / allee
+  const apronMat = new THREE.MeshStandardMaterial({ map: sidewalkTex, roughness: 1 });
+  const apron = new THREE.Mesh(new THREE.PlaneGeometry(w+2, d+2), apronMat);
+  apron.rotation.x = -Math.PI/2;
+  apron.position.set(0, 0.006, 0);
+  apron.receiveShadow = true;
+  group.add(apron);
+
+  group.position.set(cx, 0, cz);
+  group.rotation.y = rotY;
+  scene.add(group);
+}
+
+function buildDistrict() {
+  let seed = 777;
+  function rnd(){ seed = (seed*9301+49297)%233280; return seed/233280; }
+  for (let c=0;c<TOWN_COLS;c++){
+    for (let r=0;r<TOWN_ROWS;r++){
+      const lotCx = TOWN_X0 + ROAD_W + c*PITCH + LOT/2;
+      const lotCz = TOWN_Z0 + ROAD_W + r*PITCH + LOT/2;
+      if (rnd() < 0.12) continue; // parcelle libre / petit jardin
+      const jx = (rnd()-0.5)*1.2, jz = (rnd()-0.5)*1.2;
+      makeBuilding(lotCx+jx, lotCz+jz, Math.floor(rnd()*999999)+c*97+r*13);
+      if (rnd() < 0.5) makeTree(lotCx + (rnd()<0.5?-5.5:5.5), lotCz + (rnd()<0.5?-5.5:5.5), 0.7+rnd()*0.4);
+    }
+  }
+}
+buildDistrict();
+
+// ---------- Lampadaires ----------
+function makeStreetLamp(x, z) {
+  const group = new THREE.Group();
+  const poleMat = new THREE.MeshStandardMaterial({ color: 0x2c2c2c, metalness: 0.6, roughness: 0.4 });
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.06,0.08,4.2,8), poleMat);
+  pole.position.y = 2.1;
+  pole.castShadow = true;
+  group.add(pole);
+  const armMat = poleMat;
+  const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.04,0.04,0.8,6), armMat);
+  arm.rotation.z = Math.PI/2;
+  arm.position.set(0.4, 4.1, 0);
+  group.add(arm);
+  const lampMat = new THREE.MeshStandardMaterial({ color: 0xfff0c0, emissive: 0xffdd88, emissiveIntensity: 0.6, roughness: 0.4 });
+  const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.16,10,10), lampMat);
+  lamp.position.set(0.78, 4.0, 0);
+  group.add(lamp);
+  group.position.set(x,0,z);
+  scene.add(group);
+}
+for (let cIdx=0; cIdx<=TOWN_COLS; cIdx++){
+  for (let rIdx=0; rIdx<=TOWN_ROWS; rIdx++){
+    if ((cIdx+rIdx) % 2 === 0) {
+      makeStreetLamp(TOWN_X0 + cIdx*PITCH + 1.0, TOWN_Z0 + rIdx*PITCH + 1.0);
+    }
+  }
+}
+
+// ---------- Voitures garees ----------
+function makeCar(x, z, rotY, color) {
+  const group = new THREE.Group();
+  const bodyMat = new THREE.MeshStandardMaterial({ color: color, metalness: 0.4, roughness: 0.35 });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(4.2, 1.1, 1.8), bodyMat);
+  body.position.y = 0.6;
+  body.castShadow = true; body.receiveShadow = true;
+  group.add(body);
+  const cabin = new THREE.Mesh(new THREE.BoxGeometry(2.1, 0.7, 1.6), new THREE.MeshStandardMaterial({ color: 0xcfe4ee, transparent:true, opacity:0.6, roughness:0.2 }));
+  cabin.position.set(-0.2, 1.3, 0);
+  group.add(cabin);
+  const wheelMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.9 });
+  [[-1.4,-0.9],[-1.4,0.9],[1.4,-0.9],[1.4,0.9]].forEach(([wx,wz])=>{
+    const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.32,0.32,0.28,10), wheelMat);
+    wheel.rotation.x = Math.PI/2;
+    wheel.position.set(wx, 0.32, wz);
+    wheel.castShadow = true;
+    group.add(wheel);
+  });
+  group.position.set(x,0,z);
+  group.rotation.y = rotY;
+  scene.add(group);
+}
+const carColors = [0xb03a2e, 0x2e5fa3, 0xdedede, 0x2c2c2c, 0x3a6b45];
+[
+  [TOWN_X0+ROAD_W+2, TOWN_Z0-2.2, 0], [TOWN_X0+PITCH+ROAD_W+3, TOWN_Z0-2.2, 0],
+  [TOWN_X0-2.2, TOWN_Z0+ROAD_W+3, Math.PI/2], [TOWN_X0-2.2, TOWN_Z0+PITCH+ROAD_W+4, Math.PI/2],
+  [TOWN_X0+2*PITCH+ROAD_W+2, TOWN_Z0+PITCH*2-2.2, 0]
+].forEach(([x,z,rot],i)=> makeCar(x,z,rot, carColors[i % carColors.length]));
+
+// quelques arbres tampons entre le champ et la ville / route
+[[-16,-8,1.1],[-18,6,0.9],[-15,20,1.0],[-17,34,1.2],[20,-16,1.2],[30,-18,0.9]]
+  .forEach(([x,z,s]) => makeTree(x,z,s));
+
+// ---------- Resize ----------
+window.addEventListener('resize', ()=>{
+  camera.aspect = window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// ---------- Render loop ----------
+function animate(){
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+}
+animate();
+</script>
+</body>
+</html>
